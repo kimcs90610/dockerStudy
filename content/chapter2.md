@@ -190,3 +190,81 @@ ex) `docker rename chansooContainer renameContainer`
 	- `-q`는 컨테이너ID만 출력하는 옵션
 
 ### 컨테이너를 외부에 노출
+컨테이너는 가상 머신과 마찬가지로 가상 IP 주소를 할당 받는다.  
+172.17.0.x 의 IP를 순차적으로 할당
+![컨테이너IP](/img/컨테이너IP.png)
+- 컨테이너 셸에서 `ifconfig` 명령어로 ip 확인
+- 아무런 설정을 하지 않았다면 이 컨테이너는 외부에서 접근할 수 없다.
+
+> 외부에 컨테이너를 노출하기 위해서는 eth0의 IP와 포트를 호스트의 IP와 포트에 바인딩해야 한다.
+
+`$ docker run -i -t --name mywebserver -p 80:80 ubuntu:14.04`
+- -p 옵션: 컨테이너의 포트와 호스트의 포트를 바인딩한다.
+  - [호스트의 포트]:[컨테이너의 포트] 
+  - [호스트의 특정아이피]:[호스트의 포트]:[컨테이너의 포트]
+  - 여러개 가능
+    - ex) `-p 192.168.0.100:7777:80 -p 3306:3306`
+
+> 아파치 서버 설치해서 연결되는지 보기  
+
+    apt-get update
+    apt-get install apache2 -y
+    service apache2 start
+(AH00558: apache2: Could not reliably determine the server's fully qualified domain name, using 172.17.0.2. Set the 'ServerName' directive globally to suppress this message) 에러 무시해도됨
+- 웹브라우저에서 localhost:80 을 치면 아파치 페이지가 뜬다. (172.17.0.2:80 아님; 조심)
+![아파치연결](/img/아파치연결성공.png)
+
+### 컨테이너 애플리케이션 구축
+대부분의 서비스는 여러 에이전트나 데이터베이스 등과 연결되어 동작하는게 일반적.  
+이런 서비스를 **컨테이너화** 할 때 여러 개의 애플리케이션을 한 컨테이너에 설치할 수도 있다.  
+
+> 하지만 컨테이너에 애플리케이션을 **하나만 동작**시키면
+- 독립성 보장
+- 애플리케이션 버전 관리, 소스코드 모듈화 쉬워짐
+- 도커 공식 홈페이지에서도 권장하는 구조
+- 한 컨테이너에 프로세스 하나만 실행하는 것이 **도커의 철학**
+
+
+> 데이터베이스 + 워드프레스 웹 서버 컨테이너 연동
+
+	$ docker run -d \
+	> --name wordpressdb \
+	> -e MYSQL_ROOT_PASSWORD=password \
+	> -e MYSQL_DATABASE=wordpress \
+	> mysql:5.7
+
+: mysql 데이터베이스 컨테이너 생성  
+
+	$ docker run -d \
+	> -e WORDPRESS_DB_HOST=mysql \
+	> -e WORDPRESS_DB_USER=root \
+	> -e WORDPRESS_DB_PASSWORD=password \
+	> --name wordpress \
+	> --link wordpressdb:mysql \
+	> -p 80 \
+	> wordpress
+
+: 워드프레스 웹 서버 컨테이너 생성
+- -p 80 : 호스트의 포트중에 하나와 컨테이너의 80번 포트가 연결됨(호스트 포트는 뭔지 모름)  
+`docker ps` 로 확인  
+![호스트의아이피](/img/호스트의ip확인.png)  
+
+`dorker port wordpress` 로도 확인 가능 (port만)  
+
+    $ docker port wordpress
+    80/tcp -> 0.0.0.0:1110
+
+![워드프레스연결](/img/워드프레스연결.png)
+
+`-d 옵션`  
+(책에 설명 좀 잘못돼있는듯..?)
+
+- -d 옵션: 백그라운드 모드로 실행되도록 합니다. 
+
+-i -t가 컨테이너 내부로 진입하도록 attach 가능한 상태로 설정한다면, -d는 Detached 모드로 컨테이너를 실행합니다. 
+  - Detached 모드는 컨테이너를 백그라운드에서 동작하는 애플리케이션으로써 실행하도록 설정합니다.
+  - 
+
+- -e 옵션
+
+- link 옵션
