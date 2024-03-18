@@ -286,4 +286,77 @@ ex) `docker rename chansooContainer renameContainer`
   - deprecated 되었다고 함.   
 	**도커 브릿지(bridge)** 네트워크를 사용하면 동일한 기능을 손쉽게 사용할 수 있으므로 2.2.7.2절 ㄱㄱ
 
-	
+
+### 도커 볼륨
+도커 이미지로 컨테이너를 생성하면 이미지는 읽기 전용이 되며 컨테이너의 변경 사항만 별도로 저장해서 각 컨테이너의 정보를 보존한다.  
+이미 생성된 이미지는 어떠한 경우로도 변경되지 않으며, 컨테이너 계층에 원래 이미지에서 변경된 파일시스템 등을 저장합니다.  
+예) **이미지**에 mysql을 실행하는 데 필요한 애플리케이션 파일이 들어있다면 **컨테이너** 계층에는 워드프레스에서 쓴 로그인 정보나 게시글 등과 같이 데이터베이스를 운용하면서 쌓이는 데이터가 저장됩니다.
+> 치명적인 단점: 컨테이너를 삭제하면 컨테이너 계층에 저장돼 있던 데이터베이스의 정보도 삭제됨.
+
+도커의 컨테이너는 생성과 삭제가 매우 쉬우므로 실수로 컨테이너를 삭제하면 데이터를 복구할 수 없게 됨.  
+
+> 이를 방지하기 위해 가장 활용하기 쉬운 방법이 바로 도커 **볼륨**
+- 호스트와 볼륨을 공유하는 방법
+- 볼륨 컨테이너를 활용하는 방법
+- 도커가 관리하는 볼륨을 생성하는 방법  
+
+이 있다.
+
+#### 호스트 볼륨 공유
+일단 mysql 데이터베이스 컨테이너와 워드 프레스 웹 서버 컨테이너를 생성해보자.
+
+mysql 컨테이너 생성  
+
+	$ docker run -d \
+	> --name wordpressdb_host \
+	> -e MYSQL_ROOT_PASSWORD=password \
+	> -e MYSQL_DATABASE=wordpress \
+	> -v C:/dockerVolume/wordpress_db:/var/lib/mysql \
+	> mysql:5.7
+
+
+- `-v` 옵션: 디렉터리를 공유하는 옵션 
+  - [호스트의 공유 디렉터리]:[컨테이너의 공유 디렉터리]  
+
+> 컨테이너의 `/var/lib/mysql`디렉터리는 MySQL이 데이터베이스의 데이터를 저장하는 기본 디렉터리입니다.  
+> 미리 /home/wordpress_db 디렉터리를 생성하지 않았어도 도커가 자동으로 생성해줍니다.
+
+> 윈도우에서 git bash를 이용할 경우 `-v /home/wordpress_db:/var/lib/mysql `  
+> docker: Error response from daemon: mkdir C:\Program Files\Git\home: Access is denied.  
+> 에러 발생... 관리자권한도 안통함.. 그냥 풀경로 적어줘야될듯..
+
+[출처: 스택오버플로우 답변](https://stackoverflow.com/questions/73315685/error-response-from-daemon-mkdir-c-program-files-git-opt-access-is-denied)
+
+
+
+
+워드프레스 컨테이너 생성
+
+	$ docker run -d \
+	> -e WORDPRESS_DB_PASSWORD=password \
+	> --name wordpress_hostvolume \
+	> --link wordpressdb_hostvolume:mysql \
+	> -p 80 \
+	> wordpress
+
+> `ls c:/dockerVolume/wordpress_db` 볼륨 연결 확인  
+
+![볼륨연결확인](/img/볼륨연결확인.png)
+![볼륨연결확인](/img/볼륨연결확인2.png)
+
+> 컨테이너를 삭제해도 해당 디렉터리의 데이터는 그대로 남아 있는 것을 확인할 수 있다.  
+> 컨테이너의 `/var/lib/mysql` 디렉터리는 호스트의 `C:/dockerVolume/wordpress_db` 디렉터리와 동기화 되는 것이 아니라  
+ **완전히 같은 디렉터리**이다.
+
+디렉터리 단위의 공유뿐 아니라 단일 파일 단위의 공유도 가능하며, 동시에 여러 개의 -v 옵션을 쓸 수도 있습니다.  
+
+	echo hello >> c:/dockerVolume/hello && echo hello2 >> c:/dockerVolume/hello2  
+
+	$ docker run -it --name file_volume -v c:/dockerVolume/hello:/hello -v c:/dockerVolume/hello2:/hello2 ubuntu:14.04
+	root@9cee81a2fb40:/# cat hello && cat hello2
+	hello
+	hello2
+
+- echo '문자열' >> 파일 :  파일에 문자열을 추가 (파일이 없으면 생성하고 추가)
+- cat 파일 : 파일의 내용을 출력
+
