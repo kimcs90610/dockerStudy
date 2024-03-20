@@ -410,5 +410,117 @@ mysql 컨테이너 생성
 
 #### 도커 볼륨
 
+도커 자체에서 제공하는 볼륨 기능  
+
+`docker volume create` 명령으로 볼륨 생성
+
+	$ docker volume create --name myvolume
+	myvolume
+
+`docker volume ls` 명령으로 볼륨 리스트 확인
+
+	$ docker volume ls
+	DRIVER    VOLUME NAME
+	local     myvolume
+
+볼륨을 생성할 때 플러그인 드라이버를 설정해 여러 종류의 스토리지 백엔드를 쓸 수 있다.
+- `nfs`(Network File System), `aws efs`(Amazon Elastic File System), `azure file` 등의 다양한 플러그인 드라이버가 있다.
+
+예제는 기본적으로 제공되는 드라이버인 `local`을 사용.  
+
+	$ docker run -i -t --name myvolume_1 \
+	> -v myvolume:/root/ \
+	> ubuntu:14.04
+	root@6d8eaa7d9951:/# echo hello, volume! >> /root/volume
+
+- /root 디렉터리에 `volume` 파일 생성  
+
+컨테이너를 빠져나와 새로운 컨테이너를 생성해 볼륨안의 데이터가 공유되는지 확인해보자.
+
+	$ docker run -it --name myvolume_2 \
+	> -v myvolume:/root/ \
+	> ubuntu:14.04
+	root@311623fc0e9a:/# cat /root/volume
+	hello, volume!
+
+- 결과를 보면 같은 파일인 volume이 존재하는 것을 확인할 수 있다.
+
+
+docker volume 명령어로 생성한 볼륨은 아래 그림과 같은 구조로 활용된다.
+![도커볼륨사용구조](/img/볼륨사용구조.png)
+
+docker inspect 명령어를 사용하면 myvolume 볼륨이 실제로 어디에 저장되는지 알 수 있습니다.
+
+	$ docker inspect --type volume myvolume
+	[
+			{
+					"CreatedAt": "2024-03-20T03:19:00Z",
+					"Driver": "local",
+					"Labels": null,
+					"Mountpoint": "/var/lib/docker/volumes/myvolume/_data",
+					"Name": "myvolume",
+					"Options": null,
+					"Scope": "local"
+			}
+	]
+
+- `Driver` : 볼륨이 스는 드라이버
+- `Labels` : 볼륨을 구분하는 라벨 (사용자 정의 메타데이터)
+- `Mountpoint` : 해당 볼륨이 실제로 호스트의 어디에 저장됐는지를 의미
+  - Windows 운영체제에서는 wsl 내에 존재
+  - Windows에서 해당 디렉터리 확인하고 싶으면 참고 [Windows운영체제에서 /var/lib/docker 찾기](https://velog.io/@ette9844/Windows10-%EC%97%90%EC%84%9C-varlibdocker-%EC%B0%BE%EA%B8%B0)
+
+
+`docker volume create` 명령을 별도로 수행하지 않고 `-v` 옵션만으로 수행하도록 설정 할 수 있다.
+
+	$ docker run -i -t --name volume_auto \
+	> -v /root ubuntu:14.04  
+해당 명령 수행 후
+
+	$ docker volume ls
+	DRIVER    VOLUME NAME
+	local     e90870e5bae2e8b4b7c161ca3350ac70c50c3f1fff6eeb1a7956d09e41052111
+	local     myvolume
+
+목록을 조회하면 이름이 무작위 16진수 형태인 볼륨이 자동으로 생성된 것을 볼 수 있다.
+
+ - `docker container inspect volume_auto` 로 어떤 볼륨이 mount됐는지 확인 가능.(Mounts, Source 항목)
+  
+도커 볼륨을 사용하고 있는 컨테이너를 삭제해도 볼륨이 자동으로 삭제되지는 않는다.
+ - `docker volume prune` 명령어로 사용되지 않는 볼륨을 한꺼번에 삭제 가능
+
 ---
-볼륨을 활용하는 세 번째 방법은 docker volume 명령어를 사용하는 것입니다.
+
+`-v` 옵션 대신 `--mount` 옵션을 사용해도 기능은 같다.  
+도커 볼륨 마운트(type=volume) : `--mount type=volume,source=myvolume,target=/root`  
+호스트의 경로 마운트(type=bind) : `--mount type=bind,source=c:/dockerVolume/wordpress_db,target=/home/testdir`
+
+---
+
+### 도커 네트워크
+#### 도커 네트워크 구조
+
+![도커네트워크구조](/img/도커네트워크구조.png)
+
+- `veth` : 호스트에 생성되는 네트워크 인터페이스
+- `docker0` : `veth`인터페이스와 `호스트의 eth0`을 이어주는 브리지  
+  
+---
+
+도커는 각 컨테이너에 외부와의 네트워크를 제공하기 위해 컨테이너마다 가상 네트워크 인터페이스를 호스트에 생성하며 이 인터페이스의 이름은 `veth`로 시작한다.  
+ - 컨테이너가 생성될 때 도커 엔진이 자동으로 생성한다.
+ - `veth`의 v는 virtual을 의미한다. 즉 virtual ethernet 이라는 의미.
+ - 도커가 설치된 호스트(리눅스)에서 ifconfig로 컨테이너 수만큼 veth인터페이스가 생성된다.
+
+veth인터페이스 뿐만 아니라 `docker0` 이라는 브리지도 존재하는데 docker0 브리지는 각 veth 인터페이스와 바인딩돼 호스트의 eth0 인터페이스와 이어주는 역할을 한다.
+
+---
+
+> 윈도우에서는 Hyper-V Virtual Ethernet Default Switch IP를 사용중.  
+> Docker for Desktop은 WSL(Windows Subsystem for Linux)에서 돌아가고있어서..  
+> docker0이나 veth를 직접적으로 확인은 불가하다...
+
+`brctl show docker0` 명령어를 이용해 docker0 브리지에 veth이 실제로 바인딩됐는지 알 수 있다.  
+  
+
+---
