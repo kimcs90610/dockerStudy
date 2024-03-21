@@ -524,3 +524,353 @@ veth인터페이스 뿐만 아니라 `docker0` 이라는 브리지도 존재하�
   
 
 ---
+
+#### 도커 네트워크 기능
+
+컨테이너를 생성하면 기본적으로 docker0 브리지를 통해 외부와 통신할 수 있는 환경을 사용할 수 있지만 사용자의 선택에 따라 여러 네트워크 드라이버를 쓸 수도 있습니다.
+
+> 도커가 자체적으로 제공하는 네트워크 드라이버  
+  - 브리지(bridge), 호스트(host), 논(none), 컨테이너(container), 오버레이(overlay)  
+  
+> 서드파티 플러그인 솔루션
+  - weave, flannel, openvswitch 등..  
+
+
+> 네트워크 목록 확인
+
+	$ docker network ls
+	NETWORK ID     NAME      DRIVER    SCOPE
+	37f7ac294c2e   bridge    bridge    local
+	d6cd99e1a051   host      host      local
+	d930b9d027a2   none      null      local
+
+> 네트워크의 자세한 정보 확인 (예시는 bridge)
+
+	$ docker network inspect bridge
+	[
+			{
+					"Name": "bridge",
+					"Id": "37f7ac294c2e98186ca4b12db7600b3c2390b91f537732019153274ae061818e",
+					"Created": "2024-03-21T00:48:33.798977483Z",
+					"Scope": "local",
+					"Driver": "bridge",
+					"EnableIPv6": false,
+					"IPAM": {
+							"Driver": "default",
+							"Options": null,
+							"Config": [
+									{
+											"Subnet": "172.17.0.0/16",
+											"Gateway": "172.17.0.1"
+									}
+							]
+					},
+					"Internal": false,
+					"Attachable": false,
+					"Ingress": false,
+					"ConfigFrom": {
+							"Network": ""
+					},
+					"ConfigOnly": false,
+					"Containers": {},
+					"Options": {
+							"com.docker.network.bridge.default_bridge": "true",
+							"com.docker.network.bridge.enable_icc": "true",
+							"com.docker.network.bridge.enable_ip_masquerade": "true",
+							"com.docker.network.bridge.host_binding_ipv4": "0.0.0.0",
+							"com.docker.network.bridge.name": "docker0",
+							"com.docker.network.driver.mtu": "1500"
+					},
+					"Labels": {}
+			}
+	]
+
+- 브리지 네트워크는 컨테이너를 생성할 때 자동으로 연결되는 docker0 브리지를 활용
+- 172.17.0.x 대역을 순차적으로 할당 (Config항목의 Subnet, Gateway 참고)
+- 브리지 네트워크를 사용중인 컨테이너의 목록 확인가능
+---
+
+#### 브리지 네트워크
+기본적으로 존재하는 docker0을 사용하는 브리지 네트워크가 아닌 새로운 브리지 타입의 네트워크를 생성할 수 있다.
+
+> 새로운 브리지 네트워크 생성  
+
+	$ docker network create --driver bridge mybridge
+	793c0c261fe1ca13f251f9815e528870538405df850c14a8d73627039c345913
+
+> --net 옵션으로 네트워크 설정  
+
+	$ docker run -i -t --name mynetwork_container --net mybridge ubuntu:14.04
+
+> 새로운 IP 대역이 할당된 것 확인 ( 172.18 대역 )  
+
+	root@0f28ee850579:/# ifconfig
+	eth0      Link encap:Ethernet  HWaddr 02:42:ac:12:00:02
+						inet addr:172.18.0.2  Bcast:172.18.255.255  Mask:255.255.0.0
+						UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+						RX packets:12 errors:0 dropped:0 overruns:0 frame:0
+						TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+						collisions:0 txqueuelen:0
+						RX bytes:1112 (1.1 KB)  TX bytes:0 (0.0 B)
+
+	lo        Link encap:Local Loopback
+						inet addr:127.0.0.1  Mask:255.0.0.0
+						UP LOOPBACK RUNNING  MTU:65536  Metric:1
+						RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+						TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+						collisions:0 txqueuelen:1000
+						RX bytes:0 (0.0 B)  TX bytes:0 (0.0 B)
+
+> 유동적으로 네트워크 연결 및 끊기 가능
+
+	$ docker network disconnect mybridge mynetwork_container
+	$ docker network connect mybridge mynetwork_container
+
+ - none 네트워크, host 네트워크 같은 특별한 네트워크 모드에서는 disconnect 사용 불가능
+   - 특정 IP 대역을 갖는 브리지, 오버레이 네트워크 등에서만 사용가능하다.
+
+> disconnect 시 eth0 네트워크 인터페이스가 사라진 것을 확인 할 수 있다.
+
+	root@0f28ee850579:/# ifconfig
+	lo        Link encap:Local Loopback
+	          inet addr:127.0.0.1  Mask:255.0.0.0
+	          UP LOOPBACK RUNNING  MTU:65536  Metric:1
+	          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+	          TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+	          collisions:0 txqueuelen:1000
+	          RX bytes:0 (0.0 B)  TX bytes:0 (0.0 B)		
+
+> 서브넷, 게이트웨이, IP할당 범위 임의로 설정가능  
+> 
+	$ docker network create --driver=bridge \
+	> --subnet=172.72.0.0/16 \
+	> --ip-range=172.72.0.0/24 \
+	> --gateway=172.72.0.1 \
+	> my_custom_network
+	b0d3bbafd43cee440eea462a3575f60e5837d0d4377d8805428669a2673143bc
+---
+#### 호스트 네트워크
+네트워크를 호스트로 설정하면 호스트의 네트워크 환경을 그대로 쓸 수 있다.  
+> `--net host` 옵션 사용  
+
+	docker run -i -t --name network_host --net host ubuntu:14.04
+
+- 컨테이너 내부의 애플리케이션을 별도의 포트 포워딩 없이 바로 서비스할 수 있다.  
+    - ex) 호스트 모드를 쓰는 컨테이너에서 아파치 웹 서버를 구동한다면 호스트의 IP와 컨테이너의 아파치 웹 서버 포트인 80으로 바로 접근할 수 있다.
+    - 안되는... 질문필요
+  
+
+
+---
+#### 논 네트워크
+none은 말 그대로 아무런 네트워크를 쓰지 않는 것.
+
+> `--net none` 옵션 사용
+
+	docker run -i -t --name network_none --net none ubuntu:14.04
+
+- ifconfig로 확인하면 eth0이 없고 lo 인터페이스밖에 없는것을 알 수 있다.
+
+---
+#### 컨테이너 네트워크
+다른 컨테이너의 네트워크 네임스페이스 환경을 공유할 수 있다.  
+> 공유되는 속성  
+
+- 내부IP
+- 네트워크 인터페이스의 맥(MAC) 주소
+
+> `--net container:[컨테이너이름]` 옵션 사용
+
+	$ docker run -i -t -d --name network_container_1 ubuntu:14.04
+	29310ea7d0996f0778e45471cb46517631ea0a0cd32c9f9c03dd6cdd4bed1544
+
+	$ docker run -i -t -d --name network_container_2 --net container:network_container_1 ubuntu:14.04
+	1551f28dd1036db7e82c60f7cf5a44cc66a208499ec6c6b8672616056418c14a
+
+- 다른 컨테이너의 네트워크 환경을 공유하면 내부 IP를 새로 할당받지 않으며, veth 도 생성되지 않는다.
+- `network_container_2` 컨테이너의 네트워크 관련된 사항은 전부 `~_1`과 같게 설정된다.
+---
+
+-i -t -d 옵션을 함께 사용하면 컨테이너 내부에서 셸을 실행하지만 내부로 들어가지 않으며 컨테이너도 종료되지 않는다.  
+테스트용으로 컨테이너를 생성할 때 유용하게 쓸 수 있다.
+
+---
+
+  
+#### 브리지 네트워크와 --net-alias
+
+브리지 타입의 네트워크와 run 명령어의 --net-alias 옵션을 함께 쓰면 특정 호스트 이름으로 컨테이너 여러 개에 접근할 수 있다.
+
+> `--net-alias chanchan`로 컨테이너 생성
+
+	$ docker run -i -t -d --name network_alias_container1 --net mybridge --net-alias chanchan ubuntu:14.04
+	1b076abb7ef526187c841dbf48d87ca509b794f0fa2158bc804c06b633e4a217
+
+	$ docker run -i -t -d --name network_alias_container2 --net mybridge --net-alias chanchan ubuntu:14.04
+	26c0fec6e8de117d3dc3c0b7493b7a258b06f31bbce7d44a9d18b2bff27a25c1
+
+	$ docker run -i -t -d --name network_alias_container3 --net mybridge --net-alias chanchan ubuntu:14.04
+	e0b5517def665295afb0fac841c86be3f016d53f16f57b7a2c5c61db5b10d172
+
+> `ping` 요청 전송
+
+	$ docker run -i -t --name network_alias_ping --net mybridge ubuntu:14.04
+	root@063d10416c77:/# ping -c 1 chanchan
+	PING chanchan (172.18.0.4) 56(84) bytes of data.
+	64 bytes from network_alias_container3.mybridge (172.18.0.4): icmp_seq=1 ttl=64 time=0.067 ms
+
+	--- chanchan ping statistics ---
+	1 packets transmitted, 1 received, 0% packet loss, time 0ms
+	rtt min/avg/max/mdev = 0.067/0.067/0.067/0.000 ms
+	root@063d10416c77:/# ping -c 1 chanchan
+	PING chanchan (172.18.0.2) 56(84) bytes of data.
+	64 bytes from network_alias_container1.mybridge (172.18.0.2): icmp_seq=1 ttl=64 time=0.094 ms
+
+	--- chanchan ping statistics ---
+	1 packets transmitted, 1 received, 0% packet loss, time 0ms
+	rtt min/avg/max/mdev = 0.094/0.094/0.094/0.000 ms
+	root@063d10416c77:/# ping -c 1 chanchan
+	PING chanchan (172.18.0.3) 56(84) bytes of data.
+	64 bytes from network_alias_container2.mybridge (172.18.0.3): icmp_seq=1 ttl=64 time=0.137 ms
+
+- 컨테이너 3개의 IP로 각각 ping이 전송된 것 확인
+- 매번 달라지는 IP를 결정하는 것은 라운드 로빈 방식
+- 도커 엔진에 내장된 DNS가 `chanchan` 이라는 호스트 이름을 `--net-alias`옵션으로 설정한 컨테이너로 변환(resolve)하기 때문
+
+> 브리지 네트워크의 --net-alias와 도커 DNS의 작동 구조
+![작동구조](/img/브리지네트워크와alias작동구조.png)
+
+도커의 DNS는 호스트 이름으로 유동적인 컨테이너를 찾을 때 주로 사용된다.  
+
+- `--link`
+  - 컨테이너의 IP가 변경돼도 별명으로 컨테이너를 찾을 수 있게 DNS에 의해 자동으로 관리된다.  
+  (디폴트 브리지 네트워크의 컨테이너 DNS로 관리됨)
+
+- `--net-alias`
+  - 도커는 사용자가 정의한 브리지 네트워크에 사용되는 내장 DNS 서버를 가짐
+  - 컨테이너의 IP는 DNS 서버에 alias로 지정한 호스트이름으로 등록됨
+
+> dig명령어로 chanchan 호스트 이름 변환 IP 확인
+
+	apt-get update
+	apt-get install dnsutils  
+
+---
+
+	root@063d10416c77:/# dig chanchan
+
+	; <<>> DiG 9.9.5-3ubuntu0.19-Ubuntu <<>> chanchan
+	;; global options: +cmd
+	;; Got answer:
+	;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 11138
+	;; flags: qr rd ra; QUERY: 1, ANSWER: 3, AUTHORITY: 0, ADDITIONAL: 0
+
+	;; QUESTION SECTION:
+	;chanchan.                      IN      A
+
+	;; ANSWER SECTION:
+	chanchan.               600     IN      A       172.18.0.2
+	chanchan.               600     IN      A       172.18.0.3
+	chanchan.               600     IN      A       172.18.0.4
+
+	;; Query time: 1 msec
+	;; SERVER: 127.0.0.11#53(127.0.0.11)
+	;; WHEN: Thu Mar 21 07:10:36 UTC 2024
+	;; MSG SIZE  rcvd: 98
+
+dig chanchan 명령어를 반복 입력해보면 반환되는 IP의 리스트 순서가 모두 다른 것을 알 수 있다.
+
+---
+
+#### MacVLAN 네트워크
+호스트의 네트워크 인터페이스 카드를 가상화해 물리 네트워크 환경을 컨테이너에게 동일하게 제공  
+컨테이너는 물리 네트워크상에서 가상의 맥 주소를 가지며, 해당 네트워크에 연결된 다른 장치와의 통신이 가능해진다.  
+> 기본으로 할당되는 172.17.X.X 대신 네트워크 장비의 IP를 할당받기 때문
+- MacVLAN을 사용하려면 적어도 1개의 네트워크 장비와 서버가 필요
+- `-d macvlan`옵션은 `--driver macvlan` 과 같다.
+- `--ip-range` : MacVLAN을 생성하는 호스트에서 사용할 컨테이너의 IP범위를 입력
+---
+
+### 컨테이너 로깅
+#### json-file 로그 사용하기
+도커는 컨테이너의 표준 출력과 에러 로그를 별도의 메타데이터 파일로 저장하며 이를 확인하는 명령어를 제공한다.
+
+> `docker logs`명령어로 컨테이너의 표준 출력 확인하기
+
+	$ docker run -d --name mysql_log -e MYSQL_ROOT_PASSWORD=1234 mysql:5.7
+	c4fec1ef912dd71e5985b28b5cc85dfb60224dd19e17cb328d55ea43b86542f6
+
+	확인용 mysql 컨테이너 생성 후
+
+	$ docker logs mysql_log
+
+	로그 확인
+
+
+> 동일한 mysql 컨테이너를 생성하되, -e 옵션을 제외하고 생성해보기  
+
+	$ docker run -d --name mysql_no_passwd mysql:5.7
+	79f55f92d50ae049d8934857985c36eeb33575cabe5a8476a215d16fa2cb44d0
+- 생성 후 `docker ps`명령어로 실행되지 않은 것을 확인
+- `docker start` 명령어로 다시 시작해도 컨테이너는 시작되지 않는다.  
+- `docker attach` 명령어도 사용 불가능
+  
+> 실행 안되는 컨테이너 로그 확인
+
+	$ docker logs mysql_no_passwd
+	2024-03-21 08:31:15+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 5.7.44-1.el7 started.
+	2024-03-21 08:31:15+00:00 [Note] [Entrypoint]: Switching to dedicated user 'mysql'
+	2024-03-21 08:31:15+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 5.7.44-1.el7 started.
+	2024-03-21 08:31:15+00:00 [ERROR] [Entrypoint]: Database is uninitialized and password option is not specified
+			You need to specify one of the following as an environment variable:
+			- MYSQL_ROOT_PASSWORD
+			- MYSQL_ALLOW_EMPTY_PASSWORD
+			- MYSQL_RANDOM_ROOT_PASSWORD  
+
+> `--tail` 옵션으로 마지막 로그 줄 부터 출력할 줄의 수 설정하기  
+
+	$ docker logs --tail 4 mysql_no_passwd
+			You need to specify one of the following as an environment variable:
+			- MYSQL_ROOT_PASSWORD
+			- MYSQL_ALLOW_EMPTY_PASSWORD
+			- MYSQL_RANDOM_ROOT_PASSWORD
+
+> `--since` 옵션으로 특정시간 이후의 로그를 확인하기 (유닉스시간)  
+
+	$ docker logs --since 1710977400 mysql_no_passwd
+	2024-03-21 08:31:15+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 5.7.44-1.el7 started.
+	2024-03-21 08:31:15+00:00 [Note] [Entrypoint]: Switching to dedicated user 'mysql'
+	2024-03-21 08:31:15+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 5.7.44-1.el7 started.
+	2024-03-21 08:31:15+00:00 [ERROR] [Entrypoint]: Database is uninitialized and password option is not specified
+			You need to specify one of the following as an environment variable:
+			- MYSQL_ROOT_PASSWORD
+			- MYSQL_ALLOW_EMPTY_PASSWORD
+			- MYSQL_RANDOM_ROOT_PASSWORD
+
+- 1710977400 : Thu Mar 21 2024 08:30:00 UTC+0900 (한국 표준시)
+- `-t` 옵션으로 타임스탬프를 표시할 수도 있다.
+- `-f` 옵션을 써서 로그를 스트림으로 확인할 수 있다.  
+
+
+> 기본적으로 컨테이너 로그는 JSON 형태로 도커 내부에 저장된다.
+ - `/var/lib/docker/containers/${CONTAINER_ID}/${CONTAINER_ID}-json.log`
+
+> `--log-opt` 옵션으로 컨테이너 json 로그 파일의 크기, 개수 설정 가능  
+
+	`$ docker run -it --log-opt max-size=10k --log-opt max-file=3 --name log-test ubuntu:14.04`  
+
+- syslog, journald, fluentd, awslogs 등의 로깅 드라이버들이 있다.
+- 어떠한 설정도 하지 않았다면 위와 같이 json 로그 파일로 저장한다.
+
+--- 
+
+로깅 드라이버는 기본적으로 json-file로 설정되지만 도커 데몬 시작 옵션에서 `--log-driver` 옵션을 써서 기본적으로 사용할 로깅 드라이버를 변경할 수 있다.  
+--log-opt 같은 옵션 또한 도커 데몬에 적용함으로써 모든 컨테이너에 일괄적으로 사용할 수 있습니다.  
+
+	DOCKER_OPTS="--log-driver=syslog"  
+
+	DOCKER_OPTS="--log-opt max-size=10k --log-opt max-file=3"
+
+---
+
+#### syslog 로그
