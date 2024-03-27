@@ -945,9 +945,9 @@ syslog 로깅 드라이버는 기본적으로 로컬호스트의 syslog에 저�
 	> alicek106/stress \
 	> stress --cpu 1
 
-![CPU사용률](/img/cpu사용률.png)
-
-호스트에 다른 컨테이너가 존재하지 않기 때문에 CPU를 100% 사용하고 있음을 알 수 있다.
+ 호스트에 다른 컨테이너가 존재하지 않기 때문에 CPU를 100% 사용하고 있음을 알 수 있다.
+ - wsl이라 확인불가  ( ps aux 에 %CPU컬럼 안나옴 )
+  
 
 > 512로 설정한 컨테이너가 같이있다면?
 
@@ -956,4 +956,93 @@ syslog 로깅 드라이버는 기본적으로 로컬호스트의 syslog에 저�
 	> alicek106/stress \
 	> stress --cpu 1
 
-	
+	ps aux | grep stress
+
+	... wsl에선 %CPU가 표기되지않음... top(CPU사용량확인 명령어)으로 확인시 6%/6% 로 나옴..
+
+---
+
+stress 명령어는 CPU와 메모리에 과부하를 줘서 성능을 테스트한다.  
+우분투에서 따로 설치 가능  
+
+	apt-get install stress
+
+---
+
+`--cpuset-cpus`  
+호스트에 CPU가 여러 개 잇을 때 특정 CPU만 사용하도록 설정
+
+> 3번째 CPU만 사용하도록 설정
+
+	$ docker run -d --name cpuset_2 \
+	> --cpuset-cpus=2 \
+	> alicek106/stress \
+	> stress --cpu 1
+
+	우분투 or CentOS의 htop 으로 사용량 확인가능
+
+- --cpuset-cpus="0,3" 은 1, 4번째 CPU를, --cpuset-cpus="0-2"는 1,2,3번째 CPU를 사용하도록 설정
+
+`--cpu-period`, `--cpu-quota`
+
+컨테이너의 [CFS(Completely Fair Scheduler)](https://jamcorp6733.tistory.com/201) 주기는 기본적으로 100ms로 설정되지만 run 명령어의 옵션 중 --cpu-period와 --cpu-quota로 이 주기를 변경할 수 있다.
+
+	$ docker run -d --name quota_1_4 \
+	> --cpu-period=100000 \
+	> --cpu-quota=25000 \
+	> alicek106/stress \
+	> stress --cpu 1
+- --cpu-period의 값은 기본적으로 100000이며, 이는 100ms를 의미한다.
+- quota는 period에 설정된 시간 중 CPU 스케줄링에 얼마나 할당할 것인지 설정 (위 예시는 1/4)
+  즉, 일반적인 컨테이너보다 CPU 성능이 1/4 정도로 감소한다.
+
+`--cpus`
+좀 더 직관적으로 CPU의 개수를 직접 지정한다.  
+--cpus=0.5 는  
+--cpu-period=100000 or --cpu-quota=50000 과 같다
+
+--- 
+
+병렬 처리를 위해 CPU를 많이 소모하는 워크로드를 수행해야 한다면 --cpuset-cpu 옵션을 사용하는 것이 좋다.  
+- 컨테이너가 특정 CPU에서만 동작하는 CPU 친화성 보장
+- CPU 캐시미스 또는 컨텍스트 스위칭과 같은 성능 하락 요인 최소화
+
+---
+
+#### Block I/O 제한
+
+run 명령어에서  
+ - `--device-write-bps [디바이스]:[값]` : 쓰기 속도 제한
+ - `--device-read-bps [디바이스]:[값]` : 읽기 속도 제한
+    - ex) 디바이스:1mb 
+ - `--device-write-iops [디바이스]:[값]` : 쓰기 속도 상대적으로 제한
+ - `--device-read-iops [디바이스]:[값]` : 읽기 속도 상대적으로 제한
+    - ex) 디바이스:5  
+    - A컨테이너 5, B컨테이너 10 이면 B컨테이너가 A보다 2배 빠름
+
+옵션을 지정해 블록 입출력을 제한할 수 있다.  
+단, Direct I/O 의 경우에만 제한되고, Buffered I/O 는 제한되지 않음.  
+
+
+> Direct I/O, Bufferd I/O란?
+- Direct I/O : 유저 공간의 데이터를 page cache를 사용하지않고 저장 장치에 직접 저장 (대표적으로 DBMS, 가상머신에서 주로 사용)
+- Buffered I/O : page cache를 활용하여 데이터가 저장장치에 저장되는 주기를 조절함으로서 성능 향상의 이점을 얻는다.  
+  - 매번 통신 할 때 마다 할당된 메모리를  락(lock)할 필요가 없다.
+  - 일반적으로 비디오, 키보드 마우스, 가상 드라이버들이 buffered I/O 방식을 사용
+
+
+- page cache : 운영체제가 컴퓨터 성능을 위해 만든 메모리영역, 디스크접근 시간보다 메모리 접근시간이 더 빠르므로 메모리에 캐시해놓는 영역이라고 생각하면 된다.
+
+출처:  
+- https://richong.tistory.com/297
+- https://oslab.kaist.ac.kr/wp-content/uploads/esos_files/publication/conferences/korean/KCC2014_parkdongil.pdf
+
+
+#### 스토리지 드라이버와 컨테이너 저장 공간 제한
+도커 엔진은 컨테이너 내부의 저장 공간을 제한하는 기능을 보편적으로 제공하지는 않지만, 도커의 스토리지 드라이버나 파일 시스템 등이 특정 조건을 만족하는 경우에만 이 기능을 제한적으로 사용할 수 있다.  
+모든 스토리지 드라이버에서 제한할 수 있는것은 아니다.  
+컨테이너 자체가 상태를 가지는 것은 그다지 바람직하지 않다.  
+-> 따라서 컨테이너의 저장 공간을 제한하지 않는다는 선택지도 고려해 볼 수 있다.  
+
+2.5.5.3, 2.5.5.4절에서 컨테이너의 저장 공간 제한 방법 다시 다룸
+
