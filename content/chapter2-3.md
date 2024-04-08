@@ -160,8 +160,126 @@ docker rmi -f 로 강제 삭제하게되면 이미지의 이름이 <none>으로 
 
 ### 이미지 추출
 
+도커 이미지를 별도로 저장하거나 옮기는 등 필요에 따라 이미지를 단일 바이너리 파일로 저장해야 할 때 `docker save`명령어를 사용하여 하나의 파일로 추출할 수 있다.
+
+```bash
+$ docker save -o ubuntu_14_04.tar ubuntu:14.04
+
+$ docker load -i ubuntu_14_04.tar
+```
+- load 명령어로 이미지 로드시 이전의 이미지와 완전히 동일한 이미지가 도커 엔진에 생성된다.
+
+
+```bash
+$ docker export -o rootFS.tar mycontainer
+$ docker import rootFS.tar myimage:0.0
+```
+- export 명령어는 컨테이너의 파일시스템을 tar파일로 추출하며, 컨테이너 및 이미지에 대한 설정 정보를 저장하지는 않는다.
+
+이미지를 단일 파일로 저장하는 것은 효율적인 방법이 아니다. 추출된 이미지는 레이어 구조의 파일이 아닌 단일 파일이기 때문에 여러 버전의 이미지를 추출하면 이미지 용량을 각기 차지하게 된다.
+
+---
+
+
 ### 이미지 배포
 
+첫 번째 방법: 도커 허브  
+두 번째 방법: 사설 레지스트리 구축
+
 #### 도커 허브 저장소
+- 기본적으로 비공개 저장소는 1개만 무료
+- x86, ARM 등 여러 CPU 아키텍처에 알맞는 이미지를 제공  
+  (docker pull 을 하면 자동으로 호스트의 CPU 아키텍처에 해당하는 이미지를 내려받기 때문에 신경쓸 필요는 없다.)
+
+> 도커 허브 레파지토리 생성  
+
+![레파지토리](/img/도커허브레파지토리생성.png)  
+
+![생성](/img/레파지토리생성.png)
+
+- docker-study 가 실제 저장될 이미지의 이름이다.
+
+
+```bash
+$ docker commit commit_container1 docker-study:0.0
+sha256:ea2b869d81aef4fca86e890a8b563423d91b646234d2d39fd4678942ff37c786
+
+
+$ docker tag docker-study:0.0 kimcs90610/docker-study:0.0
+```
+- `docker tag [기존의 이미지이름] [새롭게 생성될 이미지 이름]` 을 이용하여 이미지 이름을 변경할 수 있다.
+
+
+```bash
+$ docker push kimcs90610/docker-study:0.0
+The push refers to repository [docker.io/kimcs90610/docker-study]
+4bb76d8c6a56: Pushed
+83109fa660b2: Mounted from library/ubuntu
+30d3c4334a23: Mounted from library/ubuntu
+f2fa9f4cf8fd: Mounted from library/ubuntu
+0.0: digest: sha256:1c21b3869acf1f5ceb54fb3893abf91d668e72b5379cafd593788613efd242d1 size: 1152
+```
+
+이미지 푸쉬 확인  
+
+![푸쉬완료](/img/이미지push확인.png)
+
+---
+
+- private 저장소의 경우 접근 권한을 가진 계정으로 로그인해야만 이미지를 내려받을 수 있다.  
+  (Collaborator에 권한을 부여할 사용자 이름을 추가하면 된다)
+
+- 조직, 팀 단위 저장소 생성가능
+- 저장소 웹 훅(Webghook) 설정 가능  
+  (이미지가 push됐을때 http요청)
+
 
 #### 도커 사설 레지스트리
+
+도커에서 공식적으로 제공하고 있는 도커 사설 레지스트리 이미지를 사용하여 개인 서버에 이미지 저장소를 만들 수 있다.
+
+```bash
+$ docker run -d --name myregistry \
+-p 5000:5000
+--restart=always \
+registry:2.6
+```
+
+- `--restart` : 컨테이너가 종료됐을 때 재시작에 대한 정책 설정  
+  (`always`는 도커 호스트나 도커 엔진을 재시작하면 컨테이너도 함께 재시작)  
+	(`on-failure:5` 는 종료 코드가 0이 아닐 때 컨테이너 재시작을 5번까지 시도)  
+	(`unless-stopped` 는 stop명령어로 정지했다면 재시작 X)
+ 
+- 레지스트리 컨테이너는 기본적으로 5000번 포트를 사용  
+ (해당 포트로 RESTful API 사용 가능)
+
+
+> push해보기  
+
+	docker tag docker-study:0.0 192.168.99.101:5000/docker-study:0.0  
+	docker push 192.168.99.101:5000/docker-study:0.0
+	--> 실행안됨
+
+- 기본적으로 도커 데몬은 HTTPS를 사용하지 않는 레지스트리 컨테이너에 접근하지 못하도록 설정되어있다.
+- `--insecure-registry` 옵션으로 HTTPS가 아니어도 push, pull 가능하게 설정가능  
+  (`DOCKER_OPTS="--insecure-registry=192.168.99.101:5000"`)
+
+---
+
+```plaintext
+레지스트리 컨테이너는 생성됨과 동시에 컨테이너 내부 디렉터리에 마운트되는 도커 볼륨을 생성한다.
+push된 이미지 파일은 이 볼륨에 저장되며 레지스트리 컨테이너가 삭제돼도 볼륨은 남아있음.
+
+컨테이너를 삭제할 때 볼륨도 함께 삭제하고 싶다면
+docker rm --volumes myregistry
+```
+
+---
+
+> 생략
+
+- Nginx 서버로 접근 권한 생성
+- 사설 레지스트리 RESTful API
+- 사설 레지스트리에 옵션 설정
+
+
