@@ -436,6 +436,7 @@ HEALTHCHECK --interval=1m --timeout=3s --retries=3 CMD curl -f http://localhost 
 - 1분마다 curl -f ~를 실행, 3초 이상 소요시 한번의 실패로 간주, 3번 이상 타임아웃이 발생하면 해당 컨테이너는 unhealthy상태가 된다.  
 
 > `SHELL`: 사용하려는 셸을 명시한다.  
+ 
 도커파일은 기본적으로 리눅스에서는 `/bin/sh -c`, 윈도우에서는 `cmd /S /C`를 사용하지만 사용하려는 셸을 직접 명시 할때 `SHELL` 명령어를 사용한다.
 ```bash
 FROM node
