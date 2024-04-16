@@ -282,7 +282,8 @@ WORKDIR /root
 COPY --from=0 /root/mainApp .
 CMD ["./mainApp"]
 ```
-- 
+- 일반적인 Dockerfile과는 다르게 2개의 FROM 사용
+- `COPY --from=0` 을 이용해 첫번째 FROM에서 빌드된 이미지의 최종상태를 카피
 
 
 ```bash
@@ -295,15 +296,158 @@ REPOSITORY                TAG           IMAGE ID       CREATED          SIZE
 go_helloworld             multi-stage   1f64bbc89371   47 minutes ago   9.27MB
 
 ```
+- 이미지 크기 9.27MB 로 현저하게 줄은 것 확인
+
+이와 같이 멀티 스테이지 빌드는 반드시 필요한 실행 파일만 최종 이미지 결과물에 포함시킴으로써 이미지 크기를 줄일 때 유용하게 사용할 수 있다.
+
+---
+>   0, 1.. 의 순으로 구분되어 사용
+```bash
+FROM golang
+ADD main.go /root
+...
+
+FROM golang
+ADD main2.go /root
+...
+
+FROM alpine:latest
+WORKDIR /root
+COPY --from=0 /root/mainApp
+COPY --from=1 /root/mainApp2
+```
+
+> 이름을 붙여서 사용가능
+```bash
+FROM golang as builder
+...
+
+...
+COPY --from=builder /root/mainApp
+...
+
+```
+---
+
 
 
 ### 2.4.4 기타 Dockerfile 명령어
+전체 목록을 확인하고 싶다면 도커 공식 사이트의 Dockerfile 레퍼런스를 참고.  
+https://docs.docker.com/reference/dockerfile/
 
 #### 2.4.4.1 ENV, VOLUME, ARG, USER
+> `ENV`: Dockerfile에서 사용될 환경변수를 지정한다.  
+```bash
+$ vi Dockerfile
+FROM ubuntu:14.04
+ENV test /home
+WORKDIR $test
+RUN touch $test/mytouchfile
+```
+- test 라는 환경변수에 /home 이라는 값을 설정
+- 환경변수는 이미지에도 저장되므로 빌드된 이미지로 컨테이너를 생성하면 환경변수 사용가능  
+
+> `VOLUME`: 빌드된 이미지로 컨테이너를 생성했을 때 호스트와 공유할 컨테이너 내부의 디렉터리를 설정함.  
+```bash
+$ vi Dockerfile
+FROM ubuntu:14.04
+RUN mkdir /home/volume
+RUN echo test >> /home/volume/testfile
+VOLUME /home/volume
+```
+- 컨테이너 내부의 /home/volume 디렉터리를 호스트와 공유하도록 설정  
+
+> `ARG`: bulid 명령어를 실행할 때 추가로 입력을 받아 Dockerfile 내에서 사용될 변수의 값을 설정  
+```bash
+$ vi Dockerfile
+FROM ubuntu:14.04
+ARG my_arg
+ARG my_arg_2=value2
+RUN touch ${my_arg}/mytouch
+```
+- build 명령어에서 my_arg와 my_arg_2라는 이름의 변수를 추가로 입력받을 것이라고 ARG를 통해 명시  
+- my_arg_2는 기본값 value2로 지정
+
+```bash
+$ docker build --build-arg my_arg=/home -t myarg:0.0 ./
+```
+- `--build-arg`옵션을 사용해 ARG에 값 입력 <키>=<값>
+- ENV와 같이 정의 시  ENV에 의해 덮어쓰여진다.
+
+> `USER`: USER로 컨테이너 내에서 사용될 사용자 계정의 이름이나 UID를 설정하면 그 아래의 명령어는 해당 사용자 권한으로 실행된다.  
+```bash
+...
+RUN groupadd -r author && useradd -r -g author kimcs90610
+USER kimcs90610
+...
+```
+- 일반적으로 RUN으로 사용자의 그룹과 계정을 생성한 뒤 사용. 
+- 루트 권한이 필요하지 않다면 USER를 사용하는 것을 권장.  
+---
+기본적으로 컨테이너 내부에서는 root 사용자를 사용하도록 설정된다.  
+이는 컨테이너가 호스트의 root 권한을 가질 수 있다는 것을 의미하기 때문에 보안 측면에서 매우 바람직하지 않다.  
+때문에 컨테이너 애플리케이션을 최종적으로 배포할 때는 컨테이너 내부에서 새로운 사용자를 새롭게 생성해 사용하는 것을 권장.  
+docker run 명령어 자체에서도 --user 옵션을 지원하지만, 가능하다면 이미지 자체에 root가 아닌 다른 사용자를 설정해 놓는 것이 좋다.  
+
+---
+
 
 #### 2.4.4.2 Onbuild, Stopsignal, Healthcheck, Shell
+> `ONBUILD`: 빌드된 이미지를 기반으로 하는 다른 이미지가 Dockerfile로 생성될 때 실행할 명령어를 추가.  
+```bash
+$ vi Dockerfile
+FROM ubuntu:14.04
+RUN echo "this is onbuild test"!
+ONBUILD RUN echo "onbuild!" >> /onbuild_file
+```
+- 해당 도커파일로 생성된 이미지를 기반으로 Dockerfile을 만들어 build시 해당 RUN ~ 명령어가 빌드시 실행된다.
+
+```bash
+FROM maven:3-jdk-8-alpine
+RUN mkdir -p /usr/src/app
+WORKDIR /usr/src/app
+ONBUILD ADD . /usr/src/app
+ONBUILD RUN mvn install
+```
+- 활용 예시: 메이븐의 도커파일
+- 개발자는 해당 도커파일을 프로젝트 폴더에 위치시키고 해당 도커파일로부터 빌드된 이미지를 FROM 항목에 입력하여 메이븐을 쉽게 사용가능  
+
+> `STOPSIGNAL`: 컨테이너가 정지될 때 사용될 시스템 콜의 종류를 지정.  
+```bash
+FROM ubuntu:14.04
+STOPSIGNAL SIGKILL
+```
+- 아무것도 설정 안할 시 기본값은 `SIGTERM`, 예제는 `SIGKILL`로 설정
+- docker run 명령어에서 --stop-signal 옵션과 같다.  
+- docker stop, docker kill 에도 적용된다.
+
+![자주쓰는시그널목록](/img/자주쓰는시그널목록.jpg)
+
+SIGKILL, SIGSTOP을 제외한 모든 SIGNAL은 Process에 의해 intercept 될 수 있습니다.  
+출처: https://kimjingo.tistory.com/73 [김징어의 Devlog:티스토리]
+
+
+> `HEALTHCHECK`: 이미지로부터 생성된 컨테이너에서 동작하는 애플리케이션의 상태를 체크하도록 설정.
+```bash
+FROM nginx
+RUN apt-get update -y && apt-get install curl -y
+HEALTHCHECK --interval=1m --timeout=3s --retries=3 CMD curl -f http://localhost || exit 1
+```
+- 1분마다 curl -f ~를 실행, 3초 이상 소요시 한번의 실패로 간주, 3번 이상 타임아웃이 발생하면 해당 컨테이너는 unhealthy상태가 된다.  
+
+> `SHELL`: 사용하려는 셸을 명시한다.  
+도커파일은 기본적으로 리눅스에서는 `/bin/sh -c`, 윈도우에서는 `cmd /S /C`를 사용하지만 사용하려는 셸을 직접 명시 할때 `SHELL` 명령어를 사용한다.
+```bash
+FROM node
+RUN echo hello, node!
+SHELL ["/usr/local/bin/node"]
+RUN -v
+```
+- node를 기본 셸로 사용하도록 설정
 
 #### 2.4.4.3 ADD. COPY
+
+
 
 #### 2.4.4.4 ENTRYPOINT, CMD
 
