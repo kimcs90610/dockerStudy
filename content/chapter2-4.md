@@ -195,14 +195,14 @@ mybuild      0.0       0212aa5bcf75   2 hours ago   221MB
 > 캐시를 이용한 이미지 빌드  
 
 ```bash
-
+# --> Dockerfile2 생성  ( RUN apt-get update 까지만 작성 )
 $ vi Dockerfile2
 FROM ubuntu:14.04
 MAINTAINER kimcs90610
 LABEL "purpose"="practice"
 RUN apt-get update
 
---> Dockerfile2 생성  ( RUN apt-get update 까지만 작성 )
+#################################
 
 $ docker build -f Dockerfile2 -t mycache:0.0 ./
 [+] Building 0.1s (6/6) FINISHED                                                                         docker:default
@@ -289,7 +289,7 @@ CMD ["./mainApp"]
 ```bash
 $ docker build . -t go_helloworld:multi-stage
 
----
+#################################################
 
 $ docker images
 REPOSITORY                TAG           IMAGE ID       CREATED          SIZE
@@ -448,8 +448,132 @@ RUN -v
 
 #### 2.4.4.3 ADD. COPY
 
+`COPY` 와 `ADD` 둘다 로컬 디렉터리의 파일을 이미지에 복사, 추가 한다는 점에서 비슷하지만,  
+`ADD`는 추가적으로 외부 및 tar파일에서도 파일을 추가할 수 있다.
+- ADD는 별로 추천하지않는다, url에서 어떤 파일이 추가될지 알 수 없기때문.
 
 
 #### 2.4.4.4 ENTRYPOINT, CMD
 
+컨테이너가 시작될때 `CMD` 로 설정된 명령어가 실행되는데, 이와 유사한 `ENTRYPOINT`라는 명령어가 있지만 서로 다른 역할을 한다.  
+
+> `CMD` 와 `ENTRYPOINT`의 차이점
+```bash
+# entrypoint: 없음, cmd: /bin/bash
+$ docker run -i -t --name no_entrypoint ubuntu:14.04 /bin/bash
+# 정상적으로 실행되면 배쉬 셸 실행
+# window에서는 /bin/bash하면 에러남 경로못찾음
+
+# 왜냐하면
+# entrypoint: 있음, cmd: /bin/bash
+$ docker run -i -t --entrypoint="echo" --name yse_entrypoint ubuntu:14.04 /bin/bash
+C:/Program Files/Git/usr/bin/bash
+# C:/Program Files/Git/usr/bin/bash 해당 경로로 출력됨
+
+# 정리
+# entrypoint: 없음, cmd: 있음
+# -> cmd 실행
+# entrypoint: 있음, cmd: 있음
+# -> cmd를 인자로 entrypoint 실행
+```
+- `entrypoint`를 설정하면, run 명령어의 맨 마지막에 입력된 cmd를 인자로 삼아 명령어를 실행합니다.
+- `entrypoint`가 설정됐다면 `cmd`는 단지 `entrypoint`에 대한 인자의 기능을 한다.
+
+---
+경로 에러 내용  
+
+	docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: exec: "C:/Program Files/Git/usr/bin/bash": stat C:/Program Files/Git/usr/bin/bash: no such file or directory: unknown.
+
+해결 참고: https://github.com/docker/for-linux/issues/246 
+
+---
+
+> `entrypoint`를 이용한 스크립트 실행
+
+```bash
+$ vi Dockerfile
+FROM ubuntu:14.04
+RUN apt-get update
+RUN apt-get install apache2 -y
+ADD entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+
+$ vi entrypoint.sh
+echo $1 $2
+apachectl -DFOREGROUND
+```
+- entrypoint.sh 파일을 이미지의 /entrypoint.sh로 추가하고 파일을 실행할 수 있도록 chmod로 권한 부여.
+
+```bash
+# 빌드
+$ docker build -t entrypoint_image:0.0 ./
+[+] Building 0.5s (10/10) FINISHED
+...
+
+# run
+$ docker run -d --name entrypoint_apache_server entrypoint_image:0.0 first second
+d733f8587bdc2ab66ff137f14dcf7f7ed19d3fa3e5cee77ecd3012c3e088413a
+
+# 로그확인
+$ docker logs entrypoint_apache_server
+first second
+
+```
+
+> JSON 배열 형태와 일반 형식의 차이점
+
+```bash
+##### 일반 형식 #####
+
+CMD echo test
+# -> /bin/sh -c echo test
+
+ENTRYPOINT /entrypoint.sh
+# -> /bin/sh -c /entrypoint.sh
+
+# 실제로 컨테이너에서 실행되는 명령어 : /bin/sh -c entrypoint.sh /bin/sh -c echo test
+
+
+##### JSON 형식 #####
+CMD ["echo", "test"]
+# -> echo test
+
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+# -> /bin/bsh /entrypoint.sh
+
+# 실제로 컨테이너에서 실행되는 명령어 : /bin/bash entrypoint.sh echo test
+
+```
+- 일반형식은 /bin/sh -c 가 앞에 추가된다.
+
 ### 2.4.5 Dockerfile로 빌드할 때 주의할 점
+
+> 잘못된 Dockerfile 사용 예시
+```bash
+$ vi Dockerfile
+FROM ubuntu:14.04
+RUN mkdir /test
+RUN fallocate -l 100m /test/dummy
+RUN rm /test/dummy
+```
+- fallocate라는 명령어는 100MB 크기의 파일을 가상으로 만들어 컨테이너에 할당하고 이를 이미지 레이어로 빌드한다.
+- 그리고 rm 명령어로 파일 삭제
+- 최종 생성된 이미지에는 /dummy가 존재하지 않음
+- 그럼에도 불구하고 이미지의 크기는 줄어들지 않음 (100MB -> 290MB)
+  - `파일을 삭제했다` 라는 변경사항으로서의 레이어로 새롭게 저장될 뿐, 실제로는 이전 레이어에 남아있음
+  - 컨테이너에서 변경된 사항만 새로운 이미지 레이어로 생성하는 방식의 단점
+
+> 방지 방법
+```bash
+$ vi Dockerfile
+FROM ubuntu:14.04
+RUN mkdir /test && \
+fallocate -l 100m /test/dummy && \
+rm /test/dummy
+```
+- &&로 각 RUN 명령을 하나로 묶으면 된다. ( 하나의 레이어로 쌓이고 끝 )
+
+> 필요한 이미지만 import, export 사용하여 만들기
+- 단점: 이전 이미지에 저장돼 있던 각종 이미지 설정은 잃어버리게 됨
+
