@@ -149,10 +149,193 @@ $ docker-compose -p myproject down
 ---
 
 ### 4.3.2 도커 컴포즈 활용
-
-
-
 #### 4.3.2.1 YAML 파일 작성
+도커 컴포즈를 사용하려면 컨테이너 설정을 저장해 놓은 YAML 파일이 필요. 그러므로 기존에 사용하던 run 명령어를 YAML 파일로 변환하는 것이 도커 컴포즈 사용범의 대부분이다.  
+YAML 파일은 크게 `버전`, `서비스`, `볼륨`, `네트워크` 정의로 구성된다.  
+각 항목의 하위 항목을 정의하려면 `2개의 공백(스페이스)`로 들여쓰기해야 한다.  
+
+---
+도커 컴포즈는 기본적으로 현재 디렉토리 또는 상위 디렉토리에서 docker-compose.yml 파일을 찾아서 컨테이너를 생성한다.  그러나 docker-compose 명령어의 `-f` 옵션을 사용하면 yml파일의 위치와 이름을 지정할 수 있다.
+
+```bash
+$ docker-compose \
+-f c:/dockerCompose/my_compose_file.yml \
+up -d
+```
+---
+
+(1) 버전정의  
+YAML 파일 포맷에는 버전 1, 2, 2.1, 3 이 있지만 가능하면 최신버전을 사용하는게 좋다.  
+(버전 3부터 도커 스웜모드와 호환된다.)  
+(현재 3.2버전까지 있는걸로 파악됨..)  
+
+버전 항목은 일반적으로  YAML파일의 맨 윗부분에 명시한다.
+
+	version: '3.0'
+
+(2) 서비스 정의  
+서비스는 도커 컴포즈로 생성할 컨테이너 옵션을 정의한다.  
+각 서비스는 컨테이너로 구현되며, 하나의 프로젝트로서 도커 컴포즈에 의해 관리된다.  
+서비스의 이름은 `services`의 하위 항목으로 정의하고, 컨테이너의 옵션은 서비스 이름의 하위 항목에 정의한다.  
+```yaml
+services:
+  my_container_1:
+    image: ...
+  my_container_2:
+    image: ...
+```
+[공식문서: https://docs.docker.com/compose/compose-file](https://docs.docker.com/compose/compose-file)  
+
+> 서비스항목이 가질 수 있는 주요 컨테이너 옵션  
+
+- `image`: 서비스의 컨테이너를 생성할 때 쓰일 이미지의 이름
+```yaml
+services:
+  my_container_1:
+    image: ubuntu:14.04
+```
+- `link`: docker run의 -link와 같다. 다른 서비스에 서비스 명만으로 접근하도록 설정한다. 별칭을 줄 수도 있다. (SERVICE:ALIAS)
+```yaml
+services:
+  web:
+    links:
+      - db
+			- db:database
+			- redis
+```
+- `environment`: docker run의 --env, -e 옵션과 동일. 컨테이너 내부에서 사용할 환경변수 설정 (딕셔너리나 배열 형태 가능)
+```yaml
+services:
+  web:
+    environment:
+      - MYSQL_ROOT_PASSWORD=mypassword
+      - MYSQL_DATABASE_NAME=mydb  
+
+#  = 를 : 로 가능
+```
+
+- `command`: docker run의 마지막에 붙는 커맨드와 같다. 컨테이너가 실행될 때 수행할 명령어를 지정한다.  
+```yaml
+services:
+  web:
+    image: alicek106/composetest:web
+    command: apachectl -DFOREGROUND # [apachectl, -DFOREGROUND]
+```
+
+- `depends_on`: 특정 컨테이너에 대한 읜존 관계를 나타내며, 이 항목에 명시된 컨테이너가 먼저 생성되고 실행됩니다.  
+```yaml
+services:
+  web:
+    image: alicek106/composetest:web
+    depends_on:
+      - mysql
+  mysql:
+    image: alicek106/composetest:mysql
+```
+특정 서비스의 컨테이너만 생성하되 의존성이 없는 컨테이너를 생성하려면 `--no-deps` 옵션을 사용한다.  
+
+	$ docker-compose up --nodeps web
+---
+links, depends_on 모두 실행 순서만 설정할 뿐 컨테이너 내부의 애플리케이션이 준비된 상태인지에 대해서는 확인하지 않는다.  
+이를 해결하는 방법으로 컨테이너에 셸 스크립트를 entrypoint로 지정하는 방법이 있다.
+```yaml
+services:
+  web:
+    # ...
+    entrypoint: ./sync_script.sh mysql:3306
+```
+
+```sh
+# sync_script.sh
+
+until (상태를 확인할 수 있는 명령어); do # 상태를 확인할수있는 명령어 예) curl mysql:3306
+  echo "depend container is not available yet"
+  sleep 1
+done
+echo "depends_on container is ready"
+```
+
+---
+
+- `ports`: docker run 명령어의 -p와 같으며 서비스의 컨테이너를 개방할 포트를 설정한다. 그러나 단일 호스트 환경에서 80:80과 같이 호스트의 특정 포트를 서비스의 컨테이너에 연결하면 docker-compose scale 명령어로 서비스의 컨테이너 수를 늘릴 수 없다.  
+
+```yaml
+services:
+  web:
+    image: alicek106/composetest:web
+      ports:
+        - "8080"
+        - "8081-8085"
+        - "80:80"
+```
+
+- `build`: build 항목에 정의된 Dockerfile에서 이미지를 빌드해 서비스의 컨테이너를 생성하도록 설정한다.  
+```yaml
+services:
+  web:
+    build: ./composetest
+    context: ./composetest
+    dockerfile: myDockerfile
+    args:
+      HOST_NAME: web
+      HOST_CONFIG: self_config
+
+# image 항목을 설정하지 않으면 이미지의 이름은 [프로젝트 이름]:[서비스 이름]
+```
+---
+build 항목을 YAML 파일에 정의해 프로젝트를 생성하고 난 뒤 Dockerfile을 변경하고 다시 프로젝트를 생성해도 이미지를 새로 빌드하지 않는다.  
+docker-compose up -d에 --build 옵션을 추하하거나 docker-compose build 명령어를 사용해 Dockerfile이 변경돼도 컨테이너를 생성할 때마다 빌드하도록 설정할 수 있다.
+```
+$ docker-compose up -d --build
+$ docker-compose build [yml 파일에서 빌드할 서비스 이름]
+```
+
+---
+
+- `extends`: 다른 YAML 파일이나 현재 YAML 파일에서 서비스 속성을 상속받게 설정한다.
+> 파일에서 상속 받는 경우
+```yaml
+# 상속받을 docker-compose.yml 파일
+version: '3.0'
+  services:
+    extends:
+      file: extends_compose.yml
+      service: extend_web
+
+# 상속할 파일명 extend_compose.yml
+version: '3.0'
+  services:
+    extend_web:
+    image: ubuntu:14.04
+    ports:
+      - "80:80"
+```
+
+> 현재 파일의 서비스 속성을 상속받는 경우
+```yaml
+version: '3.0'
+  services:
+    web:
+      extends:
+        service: extend-web
+    extend_web:
+      image: ubuntu:14.04
+      ports:
+        - "80:80"
+```
+
+`depencds_on`, `links`, `volumes_from` 항목은 각 컨테이너 사이의 의존성을 내포하고 있으므로 extends로 상속받을 수 없다.
+
+
+(3) 네트워크 정의  
+
+
+
+(4) 볼륨 정의  
+
+
+
+
 
 #### 4.3.2.2 도커 컴포즈 네트워크
 
