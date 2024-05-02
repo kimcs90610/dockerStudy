@@ -292,8 +292,9 @@ $ docker-compose build [yml 파일에서 빌드할 서비스 이름]
 
 ---
 
-- `extends`: 다른 YAML 파일이나 현재 YAML 파일에서 서비스 속성을 상속받게 설정한다.
-> 파일에서 상속 받는 경우
+- `extends`: 다른 YAML 파일이나 현재 YAML 파일에서 서비스 속성을 상속받게 설정한다.  
+
+파일에서 상속 받는 경우
 ```yaml
 # 상속받을 docker-compose.yml 파일
 version: '3.0'
@@ -310,8 +311,7 @@ version: '3.0'
     ports:
       - "80:80"
 ```
-
-> 현재 파일의 서비스 속성을 상속받는 경우
+현재 파일의 서비스 속성을 상속받는 경우
 ```yaml
 version: '3.0'
   services:
@@ -329,16 +329,160 @@ version: '3.0'
 
 (3) 네트워크 정의  
 
+- `driver`: 도커 컴포즈는 생성된 컨테이너를 위해 기본적으로 브리지 타입의 네트워크를 생성한다. 그러나 YAML 파일에서 `driver` 항목을 정의해 다른 네트워크를 사용하도록 설정할 수 있다.  
+드라이버에 필요한 옵션은 `driver_opts`로 전달할 수 있다.
 
+```yaml
+version: '3.0'
+services:
+  myservice:
+    image: nginx
+    networks:
+      - mynetwork     # 선언한 네트워크 사용
+networks:
+  mynetwork:          # 네트워크 선언
+    driver: overlay   # 스웜 모드나 주키퍼(분산처리 시스템)를 사용하는 환경에서만 생성가능
+    driver_opts:
+      subnet: "255.255.255.0"
+      IPAdress: "10.0.0.2"
+```
 
+- `ipam`: IPAM(IP Address Manager)를 위해 사용할 수 있는 옵션으로서 subnet, ip 범위 등을 설정할 수 있다. driver 항목에는 IPAM을 지원하는 드라이버의 이름을 입력한다.  
+```yaml
+services:
+...
+
+networks:
+  ipam:
+    driver: mydriver
+    config:
+      subnet: 172.20.0.0/16
+      ip_range: 172.20.5.0/24
+      gateway: 172.20.5.1
+```
+
+- `external`: YAML 파일을 통해 프로젝트를 생서할 때마다 네트워크를 생성하는 것이 아닌, 기존의 네트워크를 사용하도록 설정합니다. 이를 설정하려면 사용하려는 외부 네트워크의 이름을 하위 항목으로 입력한 뒤 external의 값을 true로 설정한다.  
+external 옵션은 준비된 네트워크를 사용하므로 driver, driver_opts, ipam을 사용할 수 없다.
+
+```yaml
+services:
+  web:
+    image: alicek106/composetest:web
+    networks:
+      - alicek106_network
+networks:
+  alicek106_network:  # 기존 네트워크
+    external: true
+```
 (4) 볼륨 정의  
 
+- `driver`: 볼륨을 생성할 때 사용될 드라이버를 설정한다. 어떠한 설정도 하지 않으면 local로 설정된다. 추가 옵션은 `driver_opts`를 통해 인자로 설정 가능
+```yaml
+version: '3.0'
+...
 
+volumes:
+  driver: flocker
+    driver_opts:
+      opt: "1"
+      opt2 : 2
+```
 
+- `external`: 도커 컴포즈는 YAML파일에서 volume, volumes-from 옵션 등을 사용하면 프로젝트마다 볼륨을 생성한다. 이때 external 옵션을 설정하면 볼륨을 프로젝트를 생성할 때마다 매번 생성하지 않고 기존 볼륨을 사용하도록 설정한다.
+
+```yaml
+services:
+  web:
+    image: alicek106/composetest:web
+    volumes:
+      - myvolume:/var/www/html   # myvolume 이란 외부 볼륨을 web서비스의 컨테이너에 마운트
+volumes:
+  myvolume:
+    external: true
+```
+(5) YAML 파일 검증하기  
+YAML 파일을 작성할 때 오타 검사나 파일 포맷이 적절한지 등을 검사하려면 `docker-compose config` 명령어를 사용한다. 기본적으로 현재 디렉토리의 docker-compose.yml 파일을 검사하지만 `-f`옵션으로 검사할 파일의 경로를 설정할 수 있다.
+
+```bash
+# 정상적일때
+$ docker-compose config
+name: dockercompose
+services:
+  mysql:
+    command:
+      - mysqld
+    image: alicek106/composetest:mysql
+    networks:
+      default: null
+  web:
+    command:
+      - apachectl
+      - -DFOREGROUND
+    depends_on:
+      mysql:
+        condition: service_started
+        restart: true
+        required: true
+    image: alicek106/composetest:web
+    links:
+      - mysql:db
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 80
+        published: "80"
+        protocol: tcp
+networks:
+  default:
+    name: dockercompose_default
+
+# 오타냈을때  networks -> netwodrks
+$ docker-compose config
+validating C:\dockerCompose\docker-compose.yml: (root) Additional property netwodrks is not allowed
+
+```
 
 
 #### 4.3.2.2 도커 컴포즈 네트워크
+YAML 파일에 네트워크 항목을 정의하지 않으면 도커 컴포즈는 프로젝트별로 브리지 타입의 네트워크를 생성한다.  생성된 네트워크의 이름은 `{프로젝트 이름}_default`로 설정되며, docker-compose up 명령어로 생성되고 docker-compose down 명령어로 삭제된다.  
+```bash
+# Network dockercompose_default Created
+$ docker-compose up -d
+[+] Running 2/3
+ - Network dockercompose_default    Created                                                      1.1s
+ ✔ Container dockercompose-mysql-1  Started                                                     0.6s
+ ✔ Container dockercompose-web-1    Started                                                     1.0s
+
+# Network dockercompose_default Removed
+$ docker-compose down
+[+] Running 3/3
+ ✔ Container dockercompose-web-1    Removed                                                      10.4s
+ ✔ Container dockercompose-mysql-1  Removed                                                      2.2s
+ ✔ Network dockercompose_default    Removed                                                      0.3s
+
+```
+
+`docker-compose scale` 명령어로 생성되는 컨테이너 전부가 이 브리지 타입의 네트워크를 사용한다.  
+서비스 내의 컨테이너는 --net-alias가 서비스의 이름을 갖도록 자동으로 설정되므로 이 네트워크에 속한 컨테이너는 서비스의 이름으로 서비스 내의 컨테이너에 접근할 수 있다.  
+
+예) scale로 컨테이너 수를 늘려도 (mysql-1, mysql-2 ... )  web서비스의 컨테이너가 mysql이라는 호스트 이름으로 접근하면 mysql 서비스의 컨테이너 중 하나의 IP로 변환(resolve)되며, 컨테이너가 여러 개 존재할 경우 라운드 로빈으로 연결을 분산한다.
+
+
+---
+`run` 명령어의 `--net-alias`와 브리지 타입의 네트워크가 작동하는 방식에 대한 자세한 설명은 2.2.7.2절 "도커 네트워크 기능"의 --net-alias 사용법 참고  
+
+---
+
 
 #### 4.3.2.3 도커 스웜 모드와 함께 사용하기
+스웜모드와 함께 사용되는 개념인 스택(stack)  
+스택은 YAML 파일에서 생성된 컨테이너의 묶음  
+YAML파일로 스택을 생성하면 YAML 파일에 정의된 서비스가 스웜 모드의 클러스터에서 일괄적으로 생성된다.  
+
+`$ docker stack deploy -c docker-compose.yml mystack`
+- mystack이라는 이름의 스택을 생성
 
 ## 4.4 도커 학습을 마치며: 도커와 컨테이너 생태계
+컨테이너 생태계에는 runC와 containerd 외에도 다양한 컨테이너들이 존재.  
+나중에 필요한 순간이 왔을때 `runC`, `containerd` 등의 키워드를 생각해내고 스스로 익힐 수 있으면 그걸로 충분
